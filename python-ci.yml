@@ -1,0 +1,92 @@
+name: CI & Security Analysis For Python Codebase
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+  pull_request:
+    branches:
+      - main
+      - master
+      - develop
+jobs:
+  lint:
+    name: Lint with ${{ matrix.lint-tool }} on python${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.12]
+        lint-tool: [isort, black, flake8, autoflake]
+    steps:
+      - name: checkout source code from repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache Python packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install isort black flake8 autoflake pyproject-autoflake bandit
+
+      - name: Run Linter
+        id: linter_step
+        run: ${{ matrix.lint-tool }} .
+        continue-on-error: ${{ matrix.lint-tool == 'flake8' }}
+
+      - name: Report flake8 failure
+        if: ${{ matrix.lint-tool == 'flake8' && steps.linter_step.outcome == 'failure' }}
+        run: echo "flake8 failed, but continuing with the workflow!"
+
+  static-analysis-with-bandit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.12]
+    steps:
+      - name: checkout source code for checking security vunerabilities using bandit
+        uses: actions/checkout@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache Python packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit
+
+      - name: Run Bandit security analysis
+        run: |
+          bandit -r . -ll -i -f html -o bandit-report.html
+          if [ $? -ne 0 ]; then
+            echo "Security issues found!"
+            exit 1
+          fi
+
+      - name: Upload Bandit report
+        uses: actions/upload-artifact@v2
+        with:
+          name: bandit-report-${{ matrix.python-version }}
+          path: bandit-report.html
